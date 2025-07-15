@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Learning Path Generator</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; margin: 0; background-color: #f8f9fa; color: #333; }
+        #header { background: #0056b3; color: white; padding: 20px; text-align: center; }
+        #header h1 { margin: 0; }
+        #container { max-width: 800px; margin: 2em auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px_10px rgba(0,0,0,0.1); }
+        input { width: calc(100% - 120px); padding: 10px; border: 1px solid #ccc; border-radius: 4px; }
+        button { width: 100px; padding: 10px 15px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; transition: background-color 0.2s; }
+        button:hover { background-color: #0056b3; }
+        #results { margin-top: 20px; }
+        .module { border: 1px solid #e0e0e0; padding: 20px; margin-bottom: 20px; border-radius: 8px; background: #fff; }
+        .module h2 { margin-top: 0; color: #0056b3; border-bottom: 2px solid #f0f0f0; padding-bottom: 10px; }
+        .lesson { margin-top: 20px; padding: 15px; border-left: 3px solid #007bff; background-color: #f8f9fa; }
+        .lesson h3 { margin-top: 0; }
+        .video-container { position: relative; padding-bottom: 56.25%; /* 16:9 aspect ratio */ height: 0; overflow: hidden; max-width: 100%; background: #000; margin: 15px 0; }
+        .video-container iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        .other-videos-list { list-style-type: '✅'; padding-left: 20px; }
+        .other-videos-list li { margin-bottom: 5px; }
+        a { color: #0056b3; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        #status { font-style: italic; color: #555; margin-top: 15px; text-align: center; }
+    </style>
+</head>
+<body>
+
+    <div id="header">
+        <h1>AI Learning Path Generator</h1>
+    </div>
+
+    <div id="container">
+        <p>Enter a topic you want to learn, and we'll generate a course outline with YouTube videos in real-time.</p>
+        <input type="text" id="topicInput" placeholder="e.g., 'The history of ancient Rome'" onkeyup="if(event.keyCode===13)generatePath()">
+        <button onclick="generatePath()">Generate</button>
+        <div id="status"></div>
+        <div id="results"></div>
+    </div>
+
+    <script>
+        /**
+         * Extracts the YouTube video ID from a URL.
+         * @param {string} url - The full YouTube URL.
+         * @returns {string|null} The video ID or null if not found.
+         */
+        function getVideoId(url) {
+            if (!url) return null;
+            try {
+                const urlObj = new URL(url);
+                if (urlObj.hostname.includes('youtube.com')) {
+                    const videoId = urlObj.searchParams.get('v');
+                    if (videoId) return videoId;
+                }
+                if (urlObj.hostname.includes('youtu.be')) {
+                    // For youtu.be links, the ID is the pathname
+                    return urlObj.pathname.slice(1);
+                }
+            } catch (e) {
+                console.error("Invalid URL for video ID extraction:", url, e);
+                return null;
+            }
+            return null;
+        }
+
+        async function generatePath() {
+            const topic = document.getElementById('topicInput').value;
+            if (!topic) {
+                alert("Please enter a topic.");
+                return;
+            }
+
+            const resultsDiv = document.getElementById('results');
+            const statusDiv = document.getElementById('status');
+            resultsDiv.innerHTML = '';
+            statusDiv.textContent = '🤖 Generating learning path... Modules will appear below as they are created.';
+            document.querySelector('button').disabled = true;
+
+            try {
+                const response = await fetch('/generate-learning-path-stream', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ topic: topic })
+                });
+
+                if (!response.body) throw new Error("Response body is missing.");
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) {
+                        statusDiv.textContent = '✅ Generation complete!';
+                        break;
+                    }
+
+                    buffer += decoder.decode(value, { stream: true });
+                    
+                    let newlineIndex;
+                    while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
+                        const line = buffer.slice(0, newlineIndex).trim();
+                        buffer = buffer.slice(newlineIndex + 1);
+
+                        if (line) {
+                            const module = JSON.parse(line);
+                            renderModule(module);
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                statusDiv.textContent = '❌ An error occurred. Please try again or check the console.';
+            } finally {
+                document.querySelector('button').disabled = false;
+            }
+        }
+
+        function renderModule(module) {
+    const resultsDiv = document.getElementById('results');
+    if (module.error) {
+        resultsDiv.innerHTML += `<div class="module"><h2>Error</h2><p>${module.error}</p></div>`;
+        return;
+    }
+    
+    let moduleHtml = `<div class="module"><h2>${module.module_title}</h2>`;
+
+    for (const lesson of module.lessons) {
+        moduleHtml += `<div class="lesson"><h3>${lesson.lesson_title}</h3>`;
+
+        if (lesson.videos && lesson.videos.length > 0) {
+            const firstVideo = lesson.videos[0];
+            const videoId = getVideoId(firstVideo.url);
+
+            if (videoId) {
+                // Embed the first video in an Iframe
+                moduleHtml += `
+                    <div class="video-container">
+                        <iframe 
+                            src="https://www.youtube.com/embed/${videoId}" 
+                            title="YouTube video player for ${firstVideo.title}" 
+                            frameborder="0" 
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
+                            allowfullscreen>
+                        </iframe>
+                    </div>
+                `;
+            }
+
+            // List any other videos as links (without duration)
+            if (lesson.videos.length > 1) {
+                moduleHtml += `<h4>Other Recommended Videos:</h4><ul class="other-videos-list">`;
+                for (let i = 1; i < lesson.videos.length; i++) {
+                    const otherVideo = lesson.videos[i];
+                    // MODIFICATION: Removed the duration display from this line.
+                    moduleHtml += `<li><a href="${otherVideo.url}" target="_blank">${otherVideo.title}</a></li>`;
+                }
+                moduleHtml += `</ul>`;
+            }
+        } else {
+            moduleHtml += `<p>No videos found for this lesson.</p>`;
+        }
+        moduleHtml += `</div>`; // Close lesson div
+    }
+    moduleHtml += `</div>`; // Close module div
+    resultsDiv.innerHTML += moduleHtml;
+}
+    </script>
+</body>
+</html>
